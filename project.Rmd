@@ -1,0 +1,170 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Gustavo García"
+date: "23/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Overview
+
+The goal of this project is to predict the manner in which 6 participants did exercise using data from accelerometers on the belt, forearm, arm, and dumbell. This is the "classe" variable in the training set. The machine learning algorithm described here is applied to predict 20 different test cases.
+
+## 2. Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## 3. Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+## 4. Exploratory Analysis
+
+First, we load some useful packages using:
+
+```{r}
+# Require the necessary packages
+library(dplyr)
+library(caret)
+```
+
+Then,we begin by exporting the data. One can simply download the training and testing datasets using:
+
+```{r}
+# Download the training and testing datasets
+
+trainFile<-"traininig.csv"
+testFile<-"testing.csv"
+
+if(!file.exists(trainFile))
+{
+   download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",trainFile,method = "curl")
+}
+if(!file.exists(testFile))
+{
+    download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",testFile,method = "curl")
+}
+```
+
+Now we load the training and testing datasets:
+
+```{r}
+training <- read.csv(trainFile)
+testing  <- read.csv(testFile)
+```
+
+Now we split the training data into two parts. We'll use 70% of this data to actually train our model and the remaining 30% to validate it:
+
+```{r}
+set.seed(12435)
+inTrain <- createDataPartition( y = training$classe,
+                                   p = 0.7,
+                                   list = FALSE)
+trainSet <- training[inTrain,]
+validationSet <- training[-inTrain,]
+```
+
+```{r}
+dim(trainSet)
+dim(validationSet)
+```
+
+We can see that the created datasets have 160 variables. Let’s clean NA, The Near Zero variance (NZV) variables and the ID variables as well.
+
+```{r}
+# clean-up the Near Zero variance (NZV) variables
+
+nzv <- nearZeroVar(trainSet)
+trainSet <- trainSet[,-nzv]
+validationSet <- validationSet[,-nzv]
+
+# Remove variables that are mostly NA
+mostlyNA <- sapply(trainSet,function(x) mean(is.na(x))) > 0.95
+trainSet <- trainSet[,mostlyNA==FALSE]
+validationSet <- validationSet[,mostlyNA==FALSE]
+
+# The first 5 variables are identifiers that are
+# not probably useful for prediction so we remove them
+trainSet <- trainSet[,-(1:5)]
+validationSet <- validationSet[,-(1:5)]
+```
+
+```{r}
+dim(trainSet)
+dim(validationSet)
+```
+
+After cleaning, we can see that the number of variables for the analysis are now only 54(53 for prediction).
+
+## 5. Prediction Model Building
+
+We'll build four models: Linear Discriminant Analysis (LDA),  k-Nearest Neighbors (kNN), a random forest and a generalized boosted model. We'll train these in the training portion of the original training dataset and then test them in the validation portion of the original training dataset:
+
+```{r cache=TRUE}
+# Build a LDA model
+set.seed(12435)
+fitLDA <- train(classe~., data=trainSet, method="lda", trControl=trainControl(method="cv", number=10), metric="Accuracy")
+
+# Build a knn model
+set.seed(12435)
+fitKNN <- train(classe~., data=trainSet, method="knn", trControl= trainControl(method="cv", number=10), metric= "Accuracy")
+
+set.seed(12435)
+# Now let's build a random forest model
+fitRF  <- train( classe ~.,
+                   data = trainSet,
+                   method = "rf",
+                   trControl = trainControl(method="cv",number=3) )
+set.seed(12435)
+# Build a generalized boosted model
+fitGBM <- train( classe ~.,
+                  data = trainSet,
+                  method = "gbm",
+                  trControl = trainControl(method="repeatedcv",number = 5,repeats = 1),
+                  verbose = FALSE)
+
+```
+
+Then let's see how well these four models perform predicting the values in the validation dataset.
+
+```{r}
+predictLDA <- predict(fitLDA, newdata=validationSet)
+conf_matrix_LDA <- confusionMatrix(predictLDA, as.factor(validationSet$classe))
+print(conf_matrix_LDA)
+```
+
+```{r}
+predictKNN <- predict(fitKNN, newdata=validationSet)
+conf_matrix_KNN <- confusionMatrix(predictKNN, as.factor(validationSet$classe))
+print(conf_matrix_KNN)
+```
+
+```{r}
+predictRF <- predict(fitRF,validationSet)
+conf_matrix_RF <- confusionMatrix(predictRF,as.factor(validationSet$classe))
+print(conf_matrix_RF)
+```
+
+```{r}
+predictGBM <- predict(fitGBM,validationSet)
+conf_matrixGBM <- confusionMatrix(predictGBM,as.factor(validationSet$classe))
+print(conf_matrixGBM)
+```
+
+## 6. Applying the selected Model to the Test Data
+
+We see the random forest has better performance (Accuracy : 0.9983) than the generalized boosted model (Accuracy : 0.9884), LDA (Accuracy: 0.7118 ) and kNN (Accuracy: 0.9183). Let's test our model in the actual testing dataset:
+
+```{r}
+predict_testRF <- predict(fitRF,testing)
+print(predict_testRF)
+```
